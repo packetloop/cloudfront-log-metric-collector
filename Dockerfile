@@ -29,4 +29,4 @@ RUN GITHUB_ASSET_ID=$(curl -sSL https://api.github.com/repos/${GITHUB_OWNER}/${G
 
 WORKDIR ${SCRIPT_PATH}
 
-CMD [ "make", "run"]
+CMD [ "make", "start"]

@@ -16,10 +16,38 @@ write these logs to SQS.
 Usage:
 ------
 
+To compile and run binary:
+
 ```bash
-$ SQS_REGION=ap-southeast-2 GoRoutine=3 \
+$ SQS_REGION=ap-southeast-2 GOROUTINE=1 \
     SQS_QUEUE_URL=https://sqs.ap-southeast-2.amazonaws.com/143032791481/testqueue \
     STATSD_HOST=127.0.0.1:8125 \
     CLUB_NAME=dev \
-    ./cloudfront-metrics-collector_linux_amd64
+	make run
+```
+
+To compile:
+
+```bash
+$ make compile
+```
+
+To release a new version:
+
+```bash
+$ make release TAG=<maj.minor.patch>
+```
+
+To run tests:
+
+```bash
+$ make test
+```
+
+To do a release and ci build: ( if you're executing this from
+your machine, please make sure you have docker-machine up and
+env exported properly).
+
+```bash
+$ make ci-build
 ```
