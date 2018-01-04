@@ -1,4 +1,4 @@
-PROJECT_NAME := cloudfront-log-metrics-collector
+PROJECT_NAME := cloudfront-log-metric-collector
 package = github.com/packetloop/$(PROJECT_NAME)
 FILENAME := $(PROJECT_NAME)_linux_amd64
 GIT_SHA = $(shell git rev-parse --verify HEAD --short)
@@ -87,7 +87,7 @@ endif
 .PHONY: release
 release: gittag
 	git tag v$(TAG) -m "v$(TAG)"
-	git push --tags packetloop
+	git push --tags packetloop -f
 
 .PHONY: gittag
 gittag:
