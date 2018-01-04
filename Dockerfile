@@ -5,7 +5,7 @@ ARG GITHUB_REPO=cloudfront-log-metric-collector
 ARG GITHUB_TAG
 ARG GITHUB_ASSET_FILENAME
 ARG GITHUB_TOKEN
-ARG PROJECT_DIR=/opt/cloudfront-metrics-collector
+ARG PROJECT_DIR=/opt/cloudfront-log-metrics-collector
 
 ENV SCRIPT_PATH=${PROJECT_DIR}
 
