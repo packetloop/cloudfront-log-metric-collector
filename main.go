@@ -18,7 +18,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.1"
+const Version = "0.0.2"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
