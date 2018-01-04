@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"sync"
 
@@ -22,7 +21,8 @@ import (
 const Version = "0.0.1"
 
 var config struct {
-	GoRoutine                int    `env:"GoRoutine,default=3"`
+	GoRoutine                int    `env:"GOROUTINE,default=1"`
+	ChannelBufferSize        int64  `env:"CHANNEL_BUFFER_SIZE,default=10"`
 	Club                     string `env:"CLUB_NAME,required"`
 	SqsRegion                string `env:"SQS_REGION,default=us-west-2"`
 	SqsQueueURL              string `env:"SQS_QUEUE_URL,required"`
@@ -41,21 +41,11 @@ type queue struct {
 	Message *sqs.Message
 }
 
-var (
-	queueURL = ""
-)
+const minGoroutineCount = 3
 
 func init() {
 	if err := envdecode.Decode(&config); err != nil {
-		log.Printf("%s\n", err.Error())
-		os.Exit(1)
-	}
-	// We need at least 3 GoRoutines because we fire up 3 goroutines. One for
-	// receiving SQS message, parse SQS/Cloudfront logs and delete message from
-	// SQS.
-	if config.GoRoutine < 3 {
-		log.Printf("%s\n", "Pls specify more than 3 GoRoutines. 3 minimum goroutines is required to run this.")
-		os.Exit(1)
+		log.Fatalf("%s\n", err.Error())
 	}
 }
 
@@ -88,19 +78,24 @@ func main() {
 	// prefix every metric with the app name
 	m.Namespace = config.StatsdPrefix
 
-	messageStreamInput := make(chan *sqs.Message, config.SqsMaxNumberOfMessages)
-	deleteMessageStream := make(chan *string, config.SqsMaxNumberOfMessages)
-	for i := 0; i <= config.GoRoutine; i++ {
+	messageStreamInput := make(chan *sqs.Message, config.ChannelBufferSize)
+	deleteMessageStream := make(chan *string, config.ChannelBufferSize)
+	// We do +1 below because i starts from non zero.
+	for i := minGoroutineCount; i <= numLoop(config.GoRoutine); i += minGoroutineCount {
 		wg.Add(i)
-		go receiveMessage(svc, messageStreamInput, &wg)
-		go printMessage(m, messageStreamInput, deleteMessageStream, &wg)
-		go deleteMessage(svc, deleteMessageStream, &wg)
+		go receiveMessage(m, svc, messageStreamInput, &wg)
+		go parseMessage(m, messageStreamInput, deleteMessageStream, &wg)
+		go deleteMessage(m, svc, deleteMessageStream, &wg)
 	}
 	wg.Wait()
-	log.Printf("%s\n", "cloudfront metric generator finished")
+	log.Printf("%s\n", "cloudfront metric generator stopped")
 }
 
-func receiveMessage(svc *sqs.SQS, messageStreamInput chan *sqs.Message, wg *sync.WaitGroup) {
+func numLoop(v int) int {
+	return (minGoroutineCount * v)
+}
+
+func receiveMessage(d *statsd.Client, svc *sqs.SQS, messageStreamInput chan *sqs.Message, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	params := &sqs.ReceiveMessageInput{
@@ -116,71 +111,196 @@ func receiveMessage(svc *sqs.SQS, messageStreamInput chan *sqs.Message, wg *sync
 	for {
 		resp, err := svc.ReceiveMessage(params)
 		if err != nil {
-			panic(err)
+			log.Fatalf("%v\n%v", params, err)
 		}
 
-		//fmt.Println(resp.GoString())
 		for _, i := range resp.Messages {
+			log.Printf("%s", "receive message from SQS")
+			event := statsd.NewEvent("receive SQS message", "recieved message from SQS")
+			err = d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
+			}
 			messageStreamInput <- i
 		}
 	}
 }
 
-func printMessage(d *statsd.Client, messageStreamInput <-chan *sqs.Message, deleteMessageStream chan<- *string, wg *sync.WaitGroup) {
+func metricTags(values ...string) []string {
+	var tags []string
+	for _, value := range values {
+		tags = append(tags, value)
+	}
+	return tags
+}
 
-	/*
-		amount of users by region
-		length of time connect per unique IP
-		geo info out of cloudfront
-		files that don't exist
-	*/
+func metricTag(k, v string) string {
+	return k + ":" + v
+}
 
+func getString(msg, v string) string {
+	return gjson.Get(msg, v).String()
+}
+
+func getFloat(msg, v string) float64 {
+	return gjson.GetBytes([]byte(msg), v).Float()
+}
+
+func parseMessage(d *statsd.Client, messageStreamInput <-chan *sqs.Message, deleteMessageStream chan<- *string, wg *sync.WaitGroup) {
 	wg.Done()
 	for {
 		select {
 		case msg := <-messageStreamInput:
 
-			clientip := gjson.GetBytes([]byte(string(*msg.Body)), "c-ip")
-			timeTaken := gjson.GetBytes([]byte(string(*msg.Body)), "time-taken")
-			cacheObject := gjson.GetBytes([]byte(string(*msg.Body)), "cs-uri-stem")
-			edgeLocation := gjson.GetBytes([]byte(string(*msg.Body)), "x-edge-location")
-			result := gjson.GetBytes([]byte(string(*msg.Body)), "x-edge-result-type")
-			s, _ := strconv.ParseFloat(fmt.Sprintf("%s", timeTaken), 10)
-			//			requestsCount, _ := strconv.Atoi()
-
 			var err error
-			// request per region
-			// this would give us a metric amount of users per region
-			err = d.Incr("request", []string{"testedge:" + edgeLocation.String(), "testenv:dev,"}, 1)
+			cIP := getString(string(*msg.Body), "c-ip")
+			timeTaken := getFloat(string(*msg.Body), "time-taken")
+			csURIStem := getString(string(*msg.Body), "cs-uri-stem")
+			xEdgeLocation := getString(string(*msg.Body), "x-edge-location")
+			xEdgeResultType := getString(string(*msg.Body), "x-edge-result-type")
+			date := getString(string(*msg.Body), "date")
+			time := getString(string(*msg.Body), "time")
+			csMethod := getString(string(*msg.Body), "cs-method")
+			scStatus := getString(string(*msg.Body), "sc-status")
+			csURIQuery := getString(string(*msg.Body), "cs-uri-query")
+			xEdgeRequestID := getString(string(*msg.Body), "x-edge-request-id")
+			xHostHeader := getString(string(*msg.Body), "x-host-header")
+			csProtocol := getString(string(*msg.Body), "cs-protocol")
+			xff := getString(string(*msg.Body), "x-forwarded-for")
+			sslProto := getString(string(*msg.Body), "ssl-protocol")
+			sslCipher := getString(string(*msg.Body), "ssl_cipher")
+			xEdgeResponseResultType := getString(string(*msg.Body), "x-edge-response-result-type")
+			csProtocolVersion := getString(string(*msg.Body), "cs-protocol-version")
+			fleStatus := getString(string(*msg.Body), "fle-status")
+			fleEncryptedFields := getString(string(*msg.Body), "fle-encrypted-fields")
+			csHost := getString(string(*msg.Body), "cs(Host)")
+			csUserAgent := getString(string(*msg.Body), "cs(User-Agent)")
+
+			err = d.Incr("request",
+				metricTags(
+					metricTag("club_name", config.Club),
+					metricTag("c_ip", cIP),
+					metricTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
+					metricTag("cs_uri_stem", csURIStem),
+					metricTag("x_edge_location", xEdgeLocation),
+					metricTag("x_edge_result_type", xEdgeResultType),
+					metricTag("date", date),
+					metricTag("time", time),
+					metricTag("cs_method", csMethod),
+					metricTag("sc_status", scStatus),
+					metricTag("cs_uri_query", csURIQuery),
+					metricTag("x_edge_request_id", xEdgeRequestID),
+					metricTag("x_host_header", xHostHeader),
+					metricTag("cs_protocol", csProtocol),
+					metricTag("x_forwarded_for", xff),
+					metricTag("ssl_protocol", sslProto),
+					metricTag("ssl_cipher", sslCipher),
+					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
+					metricTag("cs_protocol_version", csProtocolVersion),
+					metricTag("fle_status", fleStatus),
+					metricTag("fle_encrypted_fields", fleEncryptedFields),
+					metricTag("cs_host", csHost),
+					metricTag("cs_user_agent", csUserAgent)),
+				1)
 			if err != nil {
-				fmt.Printf("Error %v", err)
+				log.Printf("datadog request count metric error: %v\n%v", msg, err)
+				event := statsd.NewEvent("datadog request count metric error", fmt.Sprintf("%v. %v", msg, err))
+				err = d.Event(event)
+				if err != nil {
+					log.Printf("%v", err)
+				}
 			}
 
 			// request result type: Miss, Hit and etc per object in cache/file per edge location
 			// files that don't exist
-			err = d.Incr("result_type", []string{"testedge:" + edgeLocation.String(),
-				"testfile:" + cacheObject.String(),
-				"test-type:" + result.String(),
-				"testenv:dev,"}, 1)
+			err = d.Incr("result_type",
+				metricTags(
+					metricTag("club_name", config.Club),
+					metricTag("c_ip", cIP),
+					metricTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
+					metricTag("cs_uri_stem", csURIStem),
+					metricTag("x_edge_location", xEdgeLocation),
+					metricTag("x_edge_result_type", xEdgeResultType),
+					metricTag("date", date),
+					metricTag("time", time),
+					metricTag("cs_method", csMethod),
+					metricTag("sc_status", scStatus),
+					metricTag("cs_uri_query", csURIQuery),
+					metricTag("x_edge_request_id", xEdgeRequestID),
+					metricTag("x_host_header", xHostHeader),
+					metricTag("cs_protocol", csProtocol),
+					metricTag("x_forwarded_for", xff),
+					metricTag("ssl_protocol", sslProto),
+					metricTag("ssl_cipher", sslCipher),
+					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
+					metricTag("cs_protocol_version", csProtocolVersion),
+					metricTag("fle_status", fleStatus),
+					metricTag("fle_encrypted_fields", fleEncryptedFields),
+					metricTag("cs_host", csHost),
+					metricTag("cs_user_agent", csUserAgent)),
+				1)
 			if err != nil {
-				fmt.Printf("Error %v", err)
+				log.Printf("datadog result_type count metric error: %v\n%v", msg, err)
+				event := statsd.NewEvent("datadog result_type count metric error", fmt.Sprintf("%v. %v", msg, err))
+				err = d.Event(event)
+				if err != nil {
+					log.Printf("%v", err)
+				}
 			}
 
-			//length of time connect per unique IP
-			err = d.Gauge("request_time", s, []string{"testfile:" + fmt.Sprintf("%s", cacheObject),
-				"testedge:" + edgeLocation.String(),
-				"client_ip:" + clientip.String(),
-				"testenv:dev"}, 1)
+			err = d.Gauge("request_time",
+				timeTaken,
+				metricTags(
+					metricTag("club_name", config.Club),
+					metricTag("c_ip", cIP),
+					metricTag("cs_uri_stem", csURIStem),
+					metricTag("x_edge_location", xEdgeLocation),
+					metricTag("x_edge_result_type", xEdgeResultType),
+					metricTag("date", date),
+					metricTag("time", time),
+					metricTag("cs_method", csMethod),
+					metricTag("sc_status", scStatus),
+					metricTag("cs_uri_query", csURIQuery),
+					metricTag("x_edge_request_id", xEdgeRequestID),
+					metricTag("x_host_header", xHostHeader),
+					metricTag("cs_protocol", csProtocol),
+					metricTag("x_forwarded_for", xff),
+					metricTag("ssl_protocol", sslProto),
+					metricTag("ssl_cipher", sslCipher),
+					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
+					metricTag("cs_protocol_version", csProtocolVersion),
+					metricTag("fle_status", fleStatus),
+					metricTag("fle_encrypted_fields", fleEncryptedFields),
+					metricTag("cs_host", csHost),
+					metricTag("cs_user_agent", csUserAgent)),
+				1)
 			if err != nil {
-				fmt.Printf("Error %v", err)
+				log.Printf("datadog request_time gauge metric error: %v\n%v", msg, err)
+				event := statsd.NewEvent("datadog result_type count metric error", fmt.Sprintf("%v. %v", msg, err))
+				err = d.Event(event)
+				if err != nil {
+					log.Printf("%v", err)
+				}
+			}
+			log.Printf("%s", "process SQS message ")
+			event := statsd.NewEvent("process SQS message", "processed SQS message")
+			err = d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
 			}
 			deleteMessageStream <- msg.ReceiptHandle
 		default:
+			log.Printf("%s", "waiting SQS message")
+			event := statsd.NewEvent("waiting message", "waiting for new SQS message")
+			err := d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
+			}
 		}
 	}
 }
 
-func deleteMessage(svc *sqs.SQS, deleteMessageStream <-chan *string, wg *sync.WaitGroup) {
+func deleteMessage(d *statsd.Client, svc *sqs.SQS, deleteMessageStream <-chan *string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		select {
@@ -192,7 +312,12 @@ func deleteMessage(svc *sqs.SQS, deleteMessageStream <-chan *string, wg *sync.Wa
 
 			_, err := svc.DeleteMessage(params)
 			if err != nil {
-				panic(err)
+				event := statsd.NewEvent("delete SQS message error", fmt.Sprintf(" %v %v", msg, err))
+				err := d.Event(event)
+				if err != nil {
+					log.Printf("%v", err)
+				}
+				log.Fatalf("delete SQS message error: %v\n%v", msg, err)
 			}
 		default:
 		}

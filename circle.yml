@@ -2,10 +2,6 @@ machine:
   services:
     - docker
 
-dependencies:
-  pre:
-    - go get github.com/tcnksm/ghr
-
 test:
   override:
     - make test
@@ -20,7 +16,4 @@ deployment:
   release:
     tag: /v[0-9]+(\.[0-9]+)*/
     commands:
-      - make compile
-      - ghr -t $GITHUB_TOKEN -u $CIRCLE_PROJECT_USERNAME -r $CIRCLE_PROJECT_REPONAME --replace `git describe --tags` release/
-      - make build TOKEN=$GITHUB_TOKEN
-      - make push
+      - make ci-build

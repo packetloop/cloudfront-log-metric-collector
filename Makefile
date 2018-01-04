@@ -6,7 +6,8 @@ GIT_TAG = $(shell git describe)
 GITHUB_TAG = $(shell git describe --tags)
 DOCKER_REPO := arbornetworks-docker-v2.bintray.io
 SCRIPT_PATH := /opt/$(PROJECT_NAME)
-EXEC_ARCH := linux_amd64
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
 
 all:  test compile docker-build
 
@@ -24,7 +25,7 @@ compile: dep
 
 .PHONY: test
 test: clean dep
-	cd query && go test -race -cover -v . && cd ..
+	go test -race -cover -v ./...
 	statsdaemon --address 127.0.0.1:8125 -graphite - & go test -v -race -cover .
 
 .PHONY: bintray-login
@@ -43,13 +44,21 @@ docker-build: builddeps bintray-login
 push: bintray-login
 	docker push $(DOCKER_REPO)/$(PROJECT_NAME):$(GIT_TAG)-$(GIT_SHA)
 
-.PHONY: run
-run: rundeps
-	SQS_REGION=$(SQS_REGION) GoRoutine=$(GOROUTINE) \
+.PHONY: start
+start: rundeps
+	SQS_REGION=$(SQS_REGION) GOROUTINE=$(GOROUTINE) \
 	  SQS_QUEUE_URL=$(SQS_QUEUE_URL) \
 	  STATSD_HOST=$(STATSD_HOST) \
 	  CLUB_NAME=$(CLUB_NAME) \
-	  $(SCRIPT_PATH)/$(PROJECT_NAME)_$(EXEC_ARCH)
+	  $(SCRIPT_PATH)/$(PROJECT_NAME)_$(GOOS)_$(GOARCH)
+
+.PHONY: run
+run: rundeps
+	SQS_REGION=$(SQS_REGION) GOROUTINE=$(GOROUTINE) \
+	  SQS_QUEUE_URL=$(SQS_QUEUE_URL) \
+	  STATSD_HOST=$(STATSD_HOST) \
+	  CLUB_NAME=$(CLUB_NAME) \
+	  go run
 
 .PHONY: ci-build
 ci-build: dep
@@ -72,6 +81,7 @@ endif
 .PHONY: release
 release: gittag
 	git tag v$(TAG) -m "v$(TAG)"
+	git push --tags packetloop
 
 .PHONY: gittag
 gittag:
@@ -81,18 +91,18 @@ endif
 
 .PHONY: rundeps
 rundeps:
-	ifndef GOROUTINE
-	       $(error GOROUTINE is not set and must be >= 3)
-	endif
-	ifndef CLUB_NAME
-		$(error CLUB_NAME is not set)
-	endif
-	ifndef SQS_QUEUE_URL
-		$(error SQS_QUEUE_URL is not set)
-	endif
-	ifndef SQS_REGION
-	       $(error SQS_REGION is not set)
-	endif
-	ifndef STATSD_HOST
-	       $(error STATSD_HOST is not set)
-	endif
+ifndef GOROUTINE
+	$(error GOROUTINE is not set)
+endif
+ifndef CLUB_NAME
+	$(error CLUB_NAME is not set)
+endif
+ifndef SQS_QUEUE_URL
+	$(error SQS_QUEUE_URL is not set)
+endif
+ifndef SQS_REGION
+	$(error SQS_REGION is not set)
+endif
+ifndef STATSD_HOST
+	$(error STATSD_HOST is not set)
+endif
