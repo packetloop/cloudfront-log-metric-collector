@@ -38,7 +38,7 @@ docker-build: builddeps bintray-login
 	@docker build -t $(DOCKER_REPO)/$(PROJECT_NAME):$(GIT_TAG)-$(GIT_SHA) \
 	  --build-arg GITHUB_TAG=$(GITHUB_TAG) \
 	  --build-arg GITHUB_ASSET_FILENAME=$(FILENAME) \
-	  --build-arg GITHUB_TOKEN=$(TOKEN) .
+	  --build-arg GITHUB_TOKEN=$(GITHUB_TOKEN) .
 
 .PHONY: push
 push: bintray-login
@@ -63,8 +63,8 @@ run: rundeps
 .PHONY: ci-build
 ci-build: dep
 	@$(MAKE) compile
-	ghr -t $GITHUB_TOKEN -u $CIRCLE_PROJECT_USERNAME -r $CIRCLE_PROJECT_REPONAME --replace `git describe --tags` release/
-	@$(MAKE) build TOKEN=$GITHUB_TOKEN
+	@ghr -t $(GITHUB_TOKEN) -u $(CIRCLE_PROJECT_USERNAME) -r $(CIRCLE_PROJECT_REPONAME) --replace `git describe --tags` release/
+	@$(MAKE) docker-build GITHUB_TOKEN=$(GITHUB_TOKEN)
 	@$(MAKE) push
 
 .SILENT: clean
@@ -74,8 +74,14 @@ clean:
 
 .PHONY: builddeps
 builddeps:
-ifndef TOKEN
-	$(error TOKEN is not set)
+ifndef GITHUB_TOKEN
+	$(error GITHUB_TOKEN is not set)
+endif
+ifndef CIRCLE_PROJECT_USERNAME
+	$(error CIRCLE_PROJECT_USERNAME is not set)
+endif
+ifndef CIRCLE_PROJECT_REPONAME
+	$(error CIRCLE_PROJECT_REPONAME is not set)
 endif
 
 .PHONY: release
