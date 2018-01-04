@@ -1,7 +1,7 @@
 FROM arbornetworks-docker-v2.bintray.io/aws-cli_0.2.0:18da34d
 
 ARG GITHUB_OWNER=packetloop
-ARG GITHUB_REPO=cloudfront-metrics-collector
+ARG GITHUB_REPO=cloudfront-log-metric-collector
 ARG GITHUB_TAG
 ARG GITHUB_ASSET_FILENAME
 ARG GITHUB_TOKEN
