@@ -18,7 +18,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.3"
+const Version = "0.0.4"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
@@ -290,11 +290,6 @@ func parseMessage(d *statsd.Client, messageStreamInput <-chan *sqs.Message, dele
 			}
 			deleteMessageStream <- msg.ReceiptHandle
 		default:
-			event := statsd.NewEvent("waiting message", "waiting for new SQS message")
-			err := d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
 		}
 	}
 }
