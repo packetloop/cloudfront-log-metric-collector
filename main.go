@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	statsd "github.com/DataDog/datadog-go/statsd"
 	"github.com/joeshaw/envdecode"
@@ -18,7 +19,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.4"
+const Version = "0.0.5"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
@@ -32,8 +33,10 @@ var config struct {
 	SqsMessageAttributeNames string `env:"SQS_MESSAGE_ATTRIBUTE_NAME,default=cloudfront"`
 	// StatsdHost format host:port. Eg. 127.0.0.1:8125
 	// Only supports UDP since we rely on dogstatsd/datadog agent config.
-	StatsdHost   string `env:"STATSD_HOST,required"`
-	StatsdPrefix string `env:"STATSD_PREFIX,default=cloudfront."`
+	StatsdHost        string `env:"STATSD_HOST,required"`
+	StatsdPrefix      string `env:"STATSD_PREFIX,default=cloudfront."`
+	HeartbeatInterval int    `env:"HEARTBEAT_INTERVAL,default=5"`
+	HeartbeatTimeout  int    `env:"HEARTBEAT_INTERVAL,default=10"`
 }
 
 type queue struct {
@@ -80,12 +83,16 @@ func main() {
 
 	messageStreamInput := make(chan *sqs.Message, config.ChannelBufferSize)
 	deleteMessageStream := make(chan *string, config.ChannelBufferSize)
+	aliveParser := make(chan string)
+	aliveDelete := make(chan string)
 	// We do +1 below because i starts from non zero.
 	for i := minGoroutineCount; i <= numLoop(config.GoRoutine); i += minGoroutineCount {
 		wg.Add(i)
 		go receiveMessage(m, svc, messageStreamInput, &wg)
-		go parseMessage(m, messageStreamInput, deleteMessageStream, &wg)
-		go deleteMessage(m, svc, deleteMessageStream, &wg)
+		go parseMessage(m, messageStreamInput, deleteMessageStream, &wg, aliveParser)
+		go deleteMessage(m, svc, deleteMessageStream, &wg, aliveDelete)
+		go heartbeatParse(m, aliveParser, &wg)
+		go heartbeatDelete(m, aliveDelete, &wg)
 	}
 	wg.Wait()
 	log.Printf("%s\n", "cloudfront metric generator stopped")
@@ -146,7 +153,11 @@ func getFloat(msg, v string) float64 {
 	return gjson.GetBytes([]byte(msg), v).Float()
 }
 
-func parseMessage(d *statsd.Client, messageStreamInput <-chan *sqs.Message, deleteMessageStream chan<- *string, wg *sync.WaitGroup) {
+func parseMessage(d *statsd.Client,
+	messageStreamInput <-chan *sqs.Message,
+	deleteMessageStream chan<- *string,
+	wg *sync.WaitGroup,
+	aliveParser chan<- string) {
 	wg.Done()
 	for {
 		select {
@@ -289,12 +300,17 @@ func parseMessage(d *statsd.Client, messageStreamInput <-chan *sqs.Message, dele
 				log.Printf("%v", err)
 			}
 			deleteMessageStream <- msg.ReceiptHandle
-		default:
+		case <-time.After(time.Duration(config.HeartbeatInterval) * time.Second):
+			aliveParser <- "i am alive"
 		}
 	}
 }
 
-func deleteMessage(d *statsd.Client, svc *sqs.SQS, deleteMessageStream <-chan *string, wg *sync.WaitGroup) {
+func deleteMessage(d *statsd.Client,
+	svc *sqs.SQS,
+	deleteMessageStream <-chan *string,
+	wg *sync.WaitGroup,
+	aliveDelete chan<- string) {
 	defer wg.Done()
 	for {
 		select {
@@ -306,14 +322,54 @@ func deleteMessage(d *statsd.Client, svc *sqs.SQS, deleteMessageStream <-chan *s
 
 			_, err := svc.DeleteMessage(params)
 			if err != nil {
-				event := statsd.NewEvent("delete SQS message error", fmt.Sprintf(" %v %v", msg, err))
+				event := statsd.NewEvent("delete SQS message error", fmt.Sprintf("%v %v", msg, err))
 				err := d.Event(event)
 				if err != nil {
 					log.Printf("%v", err)
 				}
 				log.Fatalf("delete SQS message error: %v\n%v", msg, err)
 			}
-		default:
+		case <-time.After(time.Duration(config.HeartbeatInterval) * time.Second):
+			aliveDelete <- "i am alive"
+		}
+	}
+}
+
+func heartbeatParse(d *statsd.Client, aliveParser <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case msg := <-aliveParser:
+			event := statsd.NewEvent("heartbeat parser", fmt.Sprintf("%s", msg))
+			err := d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
+			}
+			log.Printf("%s %s", "heartbeat parser", msg)
+		case <-time.After(time.Duration(config.HeartbeatTimeout) * time.Second):
+			event := statsd.NewEvent("heartbeat", fmt.Sprintf("%s", "parser go routine not healthy"))
+			err := d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
+			}
+			log.Printf("%s %d", "no heartbeat received from parser with interval", config.HeartbeatInterval)
+		}
+	}
+}
+
+func heartbeatDelete(d *statsd.Client, aliveDelete <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case msg := <-aliveDelete:
+			event := statsd.NewEvent("heartbeat delete", fmt.Sprintf("%s", msg))
+			err := d.Event(event)
+			if err != nil {
+				log.Printf("%v", err)
+			}
+			log.Printf("%s %s", "heartbeat delete ", msg)
+		case <-time.After(time.Duration(config.HeartbeatTimeout) * time.Second):
+			log.Printf("%s %d", "no heartbeat received from delete with interval", config.HeartbeatInterval)
 		}
 	}
 }
