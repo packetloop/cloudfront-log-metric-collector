@@ -19,7 +19,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.5"
+const Version = "0.0.6"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
@@ -44,7 +44,10 @@ type queue struct {
 	Message *sqs.Message
 }
 
-const minGoroutineCount = 3
+const (
+	minGoroutineCount = 3
+	sourceApp         = "cloudfront_log_metric_parser"
+)
 
 func init() {
 	if err := envdecode.Decode(&config); err != nil {
@@ -123,11 +126,10 @@ func receiveMessage(d *statsd.Client, svc *sqs.SQS, messageStreamInput chan *sqs
 
 		for _, i := range resp.Messages {
 			log.Printf("%s", "receive message from SQS")
-			event := statsd.NewEvent("receive SQS message", "recieved message from SQS")
-			err = d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
+			sendEvent(d, statsd.Event{
+				Title: "recieve SQS message",
+				Text:  fmt.Sprintf("%s %s", "received message from queue", config.SqsQueueURL),
+			})
 			messageStreamInput <- i
 		}
 	}
@@ -215,11 +217,11 @@ func parseMessage(d *statsd.Client,
 				1)
 			if err != nil {
 				log.Printf("datadog request count metric error: %v\n%v", msg, err)
-				event := statsd.NewEvent("datadog request count metric error", fmt.Sprintf("%v. %v", msg, err))
-				err = d.Event(event)
-				if err != nil {
-					log.Printf("%v", err)
-				}
+				sendEvent(d, statsd.Event{
+					Title:     "datadog metric error",
+					Text:      fmt.Sprintf("%s: %v. %v", "datadog request count metric error", msg, err),
+					AlertType: statsd.Error,
+				})
 			}
 
 			// request result type: Miss, Hit and etc per object in cache/file per edge location
@@ -252,11 +254,11 @@ func parseMessage(d *statsd.Client,
 				1)
 			if err != nil {
 				log.Printf("datadog result_type count metric error: %v\n%v", msg, err)
-				event := statsd.NewEvent("datadog result_type count metric error", fmt.Sprintf("%v. %v", msg, err))
-				err = d.Event(event)
-				if err != nil {
-					log.Printf("%v", err)
-				}
+				sendEvent(d, statsd.Event{
+					Title:     "datadog metric error",
+					Text:      fmt.Sprintf("%s: %v. %v", "datadog result_type metric error", msg, err),
+					AlertType: statsd.Error,
+				})
 			}
 
 			err = d.Gauge("request_time",
@@ -287,18 +289,17 @@ func parseMessage(d *statsd.Client,
 				1)
 			if err != nil {
 				log.Printf("datadog request_time gauge metric error: %v\n%v", msg, err)
-				event := statsd.NewEvent("datadog result_type count metric error", fmt.Sprintf("%v. %v", msg, err))
-				err = d.Event(event)
-				if err != nil {
-					log.Printf("%v", err)
-				}
+				sendEvent(d, statsd.Event{
+					Title:     "datadog metric error",
+					Text:      fmt.Sprintf("%s: %v. %v", "datadog request_time metric error", msg, err),
+					AlertType: statsd.Error,
+				})
 			}
-			log.Printf("%s", "process SQS message ")
-			event := statsd.NewEvent("process SQS message", "processed SQS message")
-			err = d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
+			log.Printf("%s", "process SQS message")
+			sendEvent(d, statsd.Event{
+				Title: "process SQS message",
+				Text:  fmt.Sprintf("%s", "process sqs message successful"),
+			})
 			deleteMessageStream <- msg.ReceiptHandle
 		case <-time.After(time.Duration(config.HeartbeatInterval) * time.Second):
 			aliveParser <- "i am alive"
@@ -322,11 +323,11 @@ func deleteMessage(d *statsd.Client,
 
 			_, err := svc.DeleteMessage(params)
 			if err != nil {
-				event := statsd.NewEvent("delete SQS message error", fmt.Sprintf("%v %v", msg, err))
-				err := d.Event(event)
-				if err != nil {
-					log.Printf("%v", err)
-				}
+				sendEvent(d, statsd.Event{
+					Title:     "delete SQS message error",
+					Text:      fmt.Sprintf("%v %v", msg, err),
+					AlertType: statsd.Error,
+				})
 				log.Fatalf("delete SQS message error: %v\n%v", msg, err)
 			}
 		case <-time.After(time.Duration(config.HeartbeatInterval) * time.Second):
@@ -340,18 +341,17 @@ func heartbeatParse(d *statsd.Client, aliveParser <-chan string, wg *sync.WaitGr
 	for {
 		select {
 		case msg := <-aliveParser:
-			event := statsd.NewEvent("heartbeat parser", fmt.Sprintf("%s", msg))
-			err := d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
+			sendEvent(d, statsd.Event{
+				Title: "heartbeat parser",
+				Text:  fmt.Sprintf("%s", msg),
+			})
 			log.Printf("%s %s", "heartbeat parser", msg)
 		case <-time.After(time.Duration(config.HeartbeatTimeout) * time.Second):
-			event := statsd.NewEvent("heartbeat", fmt.Sprintf("%s", "parser go routine not healthy"))
-			err := d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
+			sendEvent(d, statsd.Event{
+				Title:     "heartbeat",
+				Text:      "parser go routine not healthy",
+				AlertType: statsd.Error,
+			})
 			log.Printf("%s %d", "no heartbeat received from parser with interval", config.HeartbeatInterval)
 		}
 	}
@@ -362,14 +362,27 @@ func heartbeatDelete(d *statsd.Client, aliveDelete <-chan string, wg *sync.WaitG
 	for {
 		select {
 		case msg := <-aliveDelete:
-			event := statsd.NewEvent("heartbeat delete", fmt.Sprintf("%s", msg))
-			err := d.Event(event)
-			if err != nil {
-				log.Printf("%v", err)
-			}
+			sendEvent(d, statsd.Event{
+				Title: "heartbeat delete",
+				Text:  fmt.Sprintf("%s", msg),
+			})
 			log.Printf("%s %s", "heartbeat delete ", msg)
 		case <-time.After(time.Duration(config.HeartbeatTimeout) * time.Second):
+			sendEvent(d, statsd.Event{
+				Title:     "heartbeat",
+				Text:      "delete go routine not healthy",
+				AlertType: statsd.Error,
+			})
 			log.Printf("%s %d", "no heartbeat received from delete with interval", config.HeartbeatInterval)
 		}
+	}
+}
+
+func sendEvent(d *statsd.Client, e statsd.Event) {
+	e.SourceTypeName = sourceApp
+	e.Tags = append(e.Tags, "club_name: "+config.Club)
+	err := d.Event(&e)
+	if err != nil {
+		log.Printf("sendEvent error: %v", err)
 	}
 }
