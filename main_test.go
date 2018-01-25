@@ -35,7 +35,7 @@ func TestNumLoop(t *testing.T) {
 	}
 }
 
-func TestMetricTag(t *testing.T) {
+func TestCreateTag(t *testing.T) {
 	var data = []struct {
 		key      string
 		val      string
@@ -46,9 +46,9 @@ func TestMetricTag(t *testing.T) {
 		{"foo", "bar", "foo:bar"},
 	}
 	for _, tt := range data {
-		actual := metricTag(tt.key, tt.val)
+		actual := createTag(tt.key, tt.val)
 		if actual != tt.expected {
-			t.Errorf("metricTag(%s, %s): expected %v, actual %v",
+			t.Errorf("createTag(%s, %s): expected %v, actual %v",
 				tt.key,
 				tt.val,
 				tt.expected,
@@ -114,7 +114,7 @@ func compare(l []string, v ...string) []string {
 	return list
 }
 
-func TestMetricTags(t *testing.T) {
+func TestAppendTags(t *testing.T) {
 	var data = []struct {
 		val1     string
 		val2     string
@@ -125,10 +125,10 @@ func TestMetricTags(t *testing.T) {
 	}
 
 	for _, tt := range data {
-		actual := metricTags(tt.val1, tt.val2)
+		actual := appendTags(tt.val1, tt.val2)
 		if len(actual) == len(tt.expected) {
 			if diff := deep.Equal(actual, tt.expected); diff != nil {
-				t.Errorf("metricTags(%s, %s): expected %v, actual %v",
+				t.Errorf("appendTags(%s, %s): expected %v, actual %v",
 					tt.val1,
 					tt.val2,
 					tt.expected,

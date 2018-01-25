@@ -19,7 +19,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.6"
+const Version = "0.0.7"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
@@ -135,7 +135,7 @@ func receiveMessage(d *statsd.Client, svc *sqs.SQS, messageStreamInput chan *sqs
 	}
 }
 
-func metricTags(values ...string) []string {
+func appendTags(values ...string) []string {
 	var tags []string
 	for _, value := range values {
 		tags = append(tags, value)
@@ -143,7 +143,7 @@ func metricTags(values ...string) []string {
 	return tags
 }
 
-func metricTag(k, v string) string {
+func createTag(k, v string) string {
 	return k + ":" + v
 }
 
@@ -190,30 +190,29 @@ func parseMessage(d *statsd.Client,
 			csUserAgent := getString(string(*msg.Body), "cs(User-Agent)")
 
 			err = d.Incr("request",
-				metricTags(
-					metricTag("club_name", config.Club),
-					metricTag("c_ip", cIP),
-					metricTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
-					metricTag("cs_uri_stem", csURIStem),
-					metricTag("x_edge_location", xEdgeLocation),
-					metricTag("x_edge_result_type", xEdgeResultType),
-					metricTag("date", date),
-					metricTag("time", time),
-					metricTag("cs_method", csMethod),
-					metricTag("sc_status", scStatus),
-					metricTag("cs_uri_query", csURIQuery),
-					metricTag("x_edge_request_id", xEdgeRequestID),
-					metricTag("x_host_header", xHostHeader),
-					metricTag("cs_protocol", csProtocol),
-					metricTag("x_forwarded_for", xff),
-					metricTag("ssl_protocol", sslProto),
-					metricTag("ssl_cipher", sslCipher),
-					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
-					metricTag("cs_protocol_version", csProtocolVersion),
-					metricTag("fle_status", fleStatus),
-					metricTag("fle_encrypted_fields", fleEncryptedFields),
-					metricTag("cs_host", csHost),
-					metricTag("cs_user_agent", csUserAgent)),
+				appendTags(
+					createTag("c_ip", cIP),
+					createTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
+					createTag("cs_uri_stem", csURIStem),
+					createTag("x_edge_location", xEdgeLocation),
+					createTag("x_edge_result_type", xEdgeResultType),
+					createTag("date", date),
+					createTag("time", time),
+					createTag("cs_method", csMethod),
+					createTag("sc_status", scStatus),
+					createTag("cs_uri_query", csURIQuery),
+					createTag("x_edge_request_id", xEdgeRequestID),
+					createTag("x_host_header", xHostHeader),
+					createTag("cs_protocol", csProtocol),
+					createTag("x_forwarded_for", xff),
+					createTag("ssl_protocol", sslProto),
+					createTag("ssl_cipher", sslCipher),
+					createTag("x_edge_response_result_type", xEdgeResponseResultType),
+					createTag("cs_protocol_version", csProtocolVersion),
+					createTag("fle_status", fleStatus),
+					createTag("fle_encrypted_fields", fleEncryptedFields),
+					createTag("cs_host", csHost),
+					createTag("cs_user_agent", csUserAgent)),
 				1)
 			if err != nil {
 				log.Printf("datadog request count metric error: %v\n%v", msg, err)
@@ -227,30 +226,29 @@ func parseMessage(d *statsd.Client,
 			// request result type: Miss, Hit and etc per object in cache/file per edge location
 			// files that don't exist
 			err = d.Incr("result_type",
-				metricTags(
-					metricTag("club_name", config.Club),
-					metricTag("c_ip", cIP),
-					metricTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
-					metricTag("cs_uri_stem", csURIStem),
-					metricTag("x_edge_location", xEdgeLocation),
-					metricTag("x_edge_result_type", xEdgeResultType),
-					metricTag("date", date),
-					metricTag("time", time),
-					metricTag("cs_method", csMethod),
-					metricTag("sc_status", scStatus),
-					metricTag("cs_uri_query", csURIQuery),
-					metricTag("x_edge_request_id", xEdgeRequestID),
-					metricTag("x_host_header", xHostHeader),
-					metricTag("cs_protocol", csProtocol),
-					metricTag("x_forwarded_for", xff),
-					metricTag("ssl_protocol", sslProto),
-					metricTag("ssl_cipher", sslCipher),
-					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
-					metricTag("cs_protocol_version", csProtocolVersion),
-					metricTag("fle_status", fleStatus),
-					metricTag("fle_encrypted_fields", fleEncryptedFields),
-					metricTag("cs_host", csHost),
-					metricTag("cs_user_agent", csUserAgent)),
+				appendTags(
+					createTag("c_ip", cIP),
+					createTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
+					createTag("cs_uri_stem", csURIStem),
+					createTag("x_edge_location", xEdgeLocation),
+					createTag("x_edge_result_type", xEdgeResultType),
+					createTag("date", date),
+					createTag("time", time),
+					createTag("cs_method", csMethod),
+					createTag("sc_status", scStatus),
+					createTag("cs_uri_query", csURIQuery),
+					createTag("x_edge_request_id", xEdgeRequestID),
+					createTag("x_host_header", xHostHeader),
+					createTag("cs_protocol", csProtocol),
+					createTag("x_forwarded_for", xff),
+					createTag("ssl_protocol", sslProto),
+					createTag("ssl_cipher", sslCipher),
+					createTag("x_edge_response_result_type", xEdgeResponseResultType),
+					createTag("cs_protocol_version", csProtocolVersion),
+					createTag("fle_status", fleStatus),
+					createTag("fle_encrypted_fields", fleEncryptedFields),
+					createTag("cs_host", csHost),
+					createTag("cs_user_agent", csUserAgent)),
 				1)
 			if err != nil {
 				log.Printf("datadog result_type count metric error: %v\n%v", msg, err)
@@ -263,29 +261,28 @@ func parseMessage(d *statsd.Client,
 
 			err = d.Gauge("request_time",
 				timeTaken,
-				metricTags(
-					metricTag("club_name", config.Club),
-					metricTag("c_ip", cIP),
-					metricTag("cs_uri_stem", csURIStem),
-					metricTag("x_edge_location", xEdgeLocation),
-					metricTag("x_edge_result_type", xEdgeResultType),
-					metricTag("date", date),
-					metricTag("time", time),
-					metricTag("cs_method", csMethod),
-					metricTag("sc_status", scStatus),
-					metricTag("cs_uri_query", csURIQuery),
-					metricTag("x_edge_request_id", xEdgeRequestID),
-					metricTag("x_host_header", xHostHeader),
-					metricTag("cs_protocol", csProtocol),
-					metricTag("x_forwarded_for", xff),
-					metricTag("ssl_protocol", sslProto),
-					metricTag("ssl_cipher", sslCipher),
-					metricTag("x_edge_response_result_type", xEdgeResponseResultType),
-					metricTag("cs_protocol_version", csProtocolVersion),
-					metricTag("fle_status", fleStatus),
-					metricTag("fle_encrypted_fields", fleEncryptedFields),
-					metricTag("cs_host", csHost),
-					metricTag("cs_user_agent", csUserAgent)),
+				appendTags(
+					createTag("c_ip", cIP),
+					createTag("cs_uri_stem", csURIStem),
+					createTag("x_edge_location", xEdgeLocation),
+					createTag("x_edge_result_type", xEdgeResultType),
+					createTag("date", date),
+					createTag("time", time),
+					createTag("cs_method", csMethod),
+					createTag("sc_status", scStatus),
+					createTag("cs_uri_query", csURIQuery),
+					createTag("x_edge_request_id", xEdgeRequestID),
+					createTag("x_host_header", xHostHeader),
+					createTag("cs_protocol", csProtocol),
+					createTag("x_forwarded_for", xff),
+					createTag("ssl_protocol", sslProto),
+					createTag("ssl_cipher", sslCipher),
+					createTag("x_edge_response_result_type", xEdgeResponseResultType),
+					createTag("cs_protocol_version", csProtocolVersion),
+					createTag("fle_status", fleStatus),
+					createTag("fle_encrypted_fields", fleEncryptedFields),
+					createTag("cs_host", csHost),
+					createTag("cs_user_agent", csUserAgent)),
 				1)
 			if err != nil {
 				log.Printf("datadog request_time gauge metric error: %v\n%v", msg, err)
@@ -379,8 +376,10 @@ func heartbeatDelete(d *statsd.Client, aliveDelete <-chan string, wg *sync.WaitG
 }
 
 func sendEvent(d *statsd.Client, e statsd.Event) {
-	e.SourceTypeName = sourceApp
-	e.Tags = append(e.Tags, "club_name: "+config.Club)
+	// Unfortunately, we can only use Datadog predefined sources. However, if we use a source that is not
+	// in this list, Datadog does not drop the event but rather ignore this invalid source name.
+	e.SourceTypeName = "apps"
+	e.Tags = appendTags(createTag("club_name", config.Club), createTag("app_name", sourceApp))
 	err := d.Event(&e)
 	if err != nil {
 		log.Printf("sendEvent error: %v", err)
