@@ -19,7 +19,7 @@ import (
 // Version in reality, I would like this to match Git tag but I am not sure
 // how I would go about this. Hence, for now we just remember to
 // bump version to match Git tag version we plan to create.
-const Version = "0.0.7"
+const Version = "0.0.8"
 
 var config struct {
 	GoRoutine                int    `env:"GOROUTINE,default=1"`
@@ -191,6 +191,7 @@ func parseMessage(d *statsd.Client,
 
 			err = d.Incr("request",
 				appendTags(
+					createTag("club_name", config.Club),
 					createTag("c_ip", cIP),
 					createTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
 					createTag("cs_uri_stem", csURIStem),
@@ -227,6 +228,7 @@ func parseMessage(d *statsd.Client,
 			// files that don't exist
 			err = d.Incr("result_type",
 				appendTags(
+					createTag("club_name", config.Club),
 					createTag("c_ip", cIP),
 					createTag("time_taken", strconv.FormatFloat(timeTaken, 'G', -1, 32)),
 					createTag("cs_uri_stem", csURIStem),
@@ -262,6 +264,7 @@ func parseMessage(d *statsd.Client,
 			err = d.Gauge("request_time",
 				timeTaken,
 				appendTags(
+					createTag("club_name", config.Club),
 					createTag("c_ip", cIP),
 					createTag("cs_uri_stem", csURIStem),
 					createTag("x_edge_location", xEdgeLocation),
